@@ -34,4 +34,5 @@ Entries are stored in the `challengeEntries` collection with:
 ## Suggested Firestore rules
 
 For a quick single-user event app, you can start with a locked-down ruleset that only your signed-in account can write. If you want, the next step can be wiring Firebase Auth or tightening the rules for public hosting.
+
 # 100K-Challenge
