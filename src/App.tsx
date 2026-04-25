@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
+  deleteDoc,
+  doc,
   onSnapshot,
   orderBy,
   query,
@@ -77,6 +79,7 @@ function App() {
   const [entries, setEntries] = useState<WorkoutEntry[]>([]);
   const [feedback, setFeedback] = useState("Ready to log.");
   const [saveState, setSaveState] = useState<"idle" | "saving">("idle");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!firestore) {
@@ -90,27 +93,33 @@ function App() {
       orderBy("performedAt", "asc"),
     );
 
-    return onSnapshot(entryQuery, (snapshot) => {
-      const nextEntries = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          liftType: data.liftType as LiftType,
-          reps: data.reps as number,
-          weight: (data.weight as number | null) ?? null,
-          performedAt: data.performedAt as string,
-          loadMoved: data.loadMoved as number,
-          bodyweightUsed: (data.bodyweightUsed as number | null) ?? null,
-          source: (data.source as "manual" | "voice") ?? "manual",
-          createdAt:
-            typeof data.createdAt?.toDate === "function"
-              ? data.createdAt.toDate().toISOString()
-              : undefined,
-        } satisfies WorkoutEntry;
-      });
+    return onSnapshot(
+      entryQuery,
+      (snapshot) => {
+        const nextEntries = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            liftType: data.liftType as LiftType,
+            reps: data.reps as number,
+            weight: (data.weight as number | null) ?? null,
+            performedAt: data.performedAt as string,
+            loadMoved: data.loadMoved as number,
+            bodyweightUsed: (data.bodyweightUsed as number | null) ?? null,
+            source: (data.source as "manual" | "voice") ?? "manual",
+            createdAt:
+              typeof data.createdAt?.toDate === "function"
+                ? data.createdAt.toDate().toISOString()
+                : undefined,
+          } satisfies WorkoutEntry;
+        });
 
-      setEntries(nextEntries);
-    });
+        setEntries(nextEntries);
+      },
+      (error) => {
+        setFeedback(`Could not load entries: ${error.message}`);
+      },
+    );
   }, []);
 
   const totalMoved = useMemo(
@@ -200,20 +209,50 @@ function App() {
 
     setSaveState("saving");
 
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Request timed out — check your Firestore security rules.")),
+        10_000,
+      ),
+    );
+
     try {
-      await addDoc(collection(firestore, getFirestoreCollectionName()), {
-        liftType,
-        reps,
-        weight,
-        performedAt,
-        loadMoved,
-        bodyweightUsed: liftType === "pull_up" ? bodyweightNumber : null,
-        source,
-        createdAt: serverTimestamp(),
-      });
+      await Promise.race([
+        addDoc(collection(firestore, getFirestoreCollectionName()), {
+          liftType,
+          reps,
+          weight,
+          performedAt,
+          loadMoved,
+          bodyweightUsed: liftType === "pull_up" ? bodyweightNumber : null,
+          source,
+          createdAt: serverTimestamp(),
+        }),
+        timeoutPromise,
+      ]);
       setFeedback(`${formatLift(liftType)} logged.`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Save failed — check Firebase.");
     } finally {
       setSaveState("idle");
+    }
+  };
+
+  const deleteEntry = async (id: string) => {
+    if (!firestore) {
+      setEntries((current) => current.filter((e) => e.id !== id));
+      setFeedback("Entry deleted.");
+      setConfirmDeleteId(null);
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(firestore, getFirestoreCollectionName(), id));
+      setFeedback("Entry deleted.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setConfirmDeleteId(null);
     }
   };
 
@@ -274,7 +313,6 @@ function App() {
               </svg>
               <div className="progress-copy">
                 <strong>{Math.round(progressPercent)}%</strong>
-                <span>{formatPounds(totalMoved)}</span>
               </div>
             </div>
           </div>
@@ -482,11 +520,34 @@ function App() {
                       {entry.weight ? `${entry.weight} lb x ${entry.reps}` : `${entry.reps} reps`}
                     </span>
                   </div>
+                  <button
+                    className="delete-btn"
+                    aria-label="Delete entry"
+                    onClick={() => setConfirmDeleteId(entry.id)}
+                  >
+                    ×
+                  </button>
                 </article>
               ))}
           </div>
         </section>
       </main>
+      {confirmDeleteId && (
+        <div className="modal-overlay" onClick={() => setConfirmDeleteId(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete this entry?</h3>
+            <p>This can't be undone.</p>
+            <div className="modal-actions">
+              <button className="ghost-button" onClick={() => setConfirmDeleteId(null)}>
+                Cancel
+              </button>
+              <button className="danger-button" onClick={() => deleteEntry(confirmDeleteId)}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
