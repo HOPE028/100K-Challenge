@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
+import type { FormEvent } from 'react'
+import {
+  addDoc,
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+} from 'firebase/firestore'
 import { firestore } from './firebase'
-import type { LiftType, WorkoutEntry } from './types'
+import type { LiftType, PushupEntry, WorkoutEntry } from './types'
 import {
   DEFAULT_BODYWEIGHT,
   buildCumulativeSeries,
@@ -13,6 +21,11 @@ import {
   getProgressPercent,
   getRemainingLoad,
 } from './lib/workout'
+
+type ChallengeTab = 'lifting' | 'pushups'
+
+const PUSHUP_GOAL = 1_000
+const PUSHUP_COLLECTION = 'pushupChallengeEntries'
 
 const demoEntries: WorkoutEntry[] = [
   {
@@ -47,12 +60,37 @@ const demoEntries: WorkoutEntry[] = [
   },
 ]
 
+const demoPushupEntries: PushupEntry[] = [
+  {
+    id: 'pushup-demo-1',
+    reps: 40,
+    performedAt: new Date(Date.now() - 18 * 60_000).toISOString(),
+  },
+  {
+    id: 'pushup-demo-2',
+    reps: 35,
+    performedAt: new Date(Date.now() - 8 * 60_000).toISOString(),
+  },
+]
+
+const getLocalIso = () => {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function App() {
+  const [activeTab, setActiveTab] = useState<ChallengeTab>('pushups')
   const [entries, setEntries] = useState<WorkoutEntry[]>([])
+  const [pushupEntries, setPushupEntries] = useState<PushupEntry[]>([])
+  const [pushupReps, setPushupReps] = useState('')
+  const [pushupStatus, setPushupStatus] = useState('')
+  const [cutoffTime, setCutoffTime] = useState(getLocalIso)
 
   useEffect(() => {
     if (!firestore) {
       setEntries(demoEntries)
+      setPushupEntries(demoPushupEntries)
       return undefined
     }
 
@@ -84,16 +122,54 @@ function App() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!firestore) {
+      return undefined
+    }
+
+    const pushupQuery = query(
+      collection(firestore, PUSHUP_COLLECTION),
+      orderBy('performedAt', 'asc'),
+    )
+
+    return onSnapshot(pushupQuery, (snapshot) => {
+      const nextEntries = snapshot.docs.map((doc) => {
+        const data = doc.data()
+        return {
+          id: doc.id,
+          reps: data.reps as number,
+          performedAt: data.performedAt as string,
+          createdAt:
+            typeof data.createdAt?.toDate === 'function'
+              ? data.createdAt.toDate().toISOString()
+              : undefined,
+        } satisfies PushupEntry
+      })
+
+      setPushupEntries(nextEntries)
+    })
+  }, [])
+
+  const filteredEntries = useMemo(() => {
+    const cutoff = new Date(cutoffTime).getTime()
+    return entries.filter(
+      (entry) => new Date(entry.performedAt).getTime() <= cutoff,
+    )
+  }, [entries, cutoffTime])
+
   const totalMoved = useMemo(
-    () => entries.reduce((sum, entry) => sum + entry.loadMoved, 0),
-    [entries],
+    () => filteredEntries.reduce((sum, entry) => sum + entry.loadMoved, 0),
+    [filteredEntries],
   )
   const progressPercent = getProgressPercent(totalMoved)
   const remainingLoad = getRemainingLoad(totalMoved)
-  const liftBreakdown = useMemo(() => buildLiftBreakdown(entries), [entries])
+  const liftBreakdown = useMemo(
+    () => buildLiftBreakdown(filteredEntries),
+    [filteredEntries],
+  )
   const cumulativeSeries = useMemo(
-    () => buildCumulativeSeries(entries),
-    [entries],
+    () => buildCumulativeSeries(filteredEntries),
+    [filteredEntries],
   )
   const chartPoints = useMemo(() => {
     if (!cumulativeSeries.length) return ''
@@ -118,6 +194,51 @@ function App() {
     if (!chartPoints) return ''
     return `M 0 92 L ${chartPoints.replaceAll(' ', ' L ')} L 100 92 Z`
   }, [chartPoints])
+  const totalPushups = useMemo(
+    () => pushupEntries.reduce((sum, entry) => sum + entry.reps, 0),
+    [pushupEntries],
+  )
+  const pushupProgressPercent = Math.min((totalPushups / PUSHUP_GOAL) * 100, 100)
+  const remainingPushups = Math.max(PUSHUP_GOAL - totalPushups, 0)
+
+  const handlePushupSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    const reps = Number(pushupReps)
+    if (!Number.isInteger(reps) || reps <= 0) {
+      setPushupStatus('Enter a positive whole number.')
+      return
+    }
+
+    const performedAt = new Date().toISOString()
+
+    if (!firestore) {
+      setPushupEntries((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          reps,
+          performedAt,
+        },
+      ])
+      setPushupReps('')
+      setPushupStatus('Added locally.')
+      return
+    }
+
+    try {
+      await addDoc(collection(firestore, PUSHUP_COLLECTION), {
+        reps,
+        performedAt,
+        createdAt: serverTimestamp(),
+      })
+      setPushupReps('')
+      setPushupStatus('Added to push-up challenge.')
+    } catch (error) {
+      console.error(error)
+      setPushupStatus('Could not save push-ups. Try again.')
+    }
+  }
 
   return (
     <div className='app-shell'>
@@ -125,8 +246,27 @@ function App() {
       <div className='glow glow-right' />
 
       <main className='app'>
-        <section className='hero-card'>
-          <p className='eyebrow'>100,000 lb challenge</p>
+        <nav className='challenge-tabs' aria-label='Challenge tabs'>
+          <button
+            type='button'
+            className={activeTab === 'lifting' ? 'active' : ''}
+            onClick={() => setActiveTab('lifting')}
+          >
+            100K lift
+          </button>
+          <button
+            type='button'
+            className={activeTab === 'pushups' ? 'active' : ''}
+            onClick={() => setActiveTab('pushups')}
+          >
+            Push-ups
+          </button>
+        </nav>
+
+        {activeTab === 'lifting' ? (
+          <>
+            <section className='hero-card'>
+              <p className='eyebrow'>100,000 lb challenge</p>
           <div className='hero-header'>
             <div>
               <h1>Live lifting dashboard</h1>
@@ -168,12 +308,12 @@ function App() {
             </article>
             <article>
               <span>Entries</span>
-              <strong>{entries.length}</strong>
+              <strong>{filteredEntries.length}</strong>
             </article>
           </div>
-        </section>
+            </section>
 
-        <section className='panel-grid dashboard-grid'>
+            <section className='panel-grid dashboard-grid'>
           <section className='panel chart-panel'>
             <div className='panel-header'>
               <div>
@@ -276,9 +416,9 @@ function App() {
               ))}
             </div>
           </section>
-        </section>
+            </section>
 
-        <section className='panel'>
+            <section className='panel'>
           <div className='panel-header'>
             <div>
               <p className='eyebrow'>Recent sets</p>
@@ -287,7 +427,7 @@ function App() {
           </div>
 
           <div className='recent-list'>
-            {entries
+            {filteredEntries
               .slice()
               .reverse()
               .map((entry) => (
@@ -307,7 +447,150 @@ function App() {
                 </article>
               ))}
           </div>
-        </section>
+            </section>
+            <section className='panel time-filter-panel'>
+          <div className='panel-header'>
+            <div>
+              <p className='eyebrow'>Time machine</p>
+              <h2>View snapshot</h2>
+            </div>
+          </div>
+          <div className='time-filter-body'>
+            <label className='time-filter-label'>
+              Show entries up to
+              <input
+                type='datetime-local'
+                value={cutoffTime}
+                onChange={(e) => setCutoffTime(e.target.value)}
+              />
+            </label>
+            <p className='filter-meta'>
+              Showing {filteredEntries.length} of {entries.length}{' '}
+              {entries.length === 1 ? 'entry' : 'entries'}
+            </p>
+          </div>
+            </section>
+          </>
+        ) : (
+          <>
+            <section className='hero-card pushup-hero'>
+              <p className='eyebrow'>1,000 push-up challenge</p>
+              <div className='hero-header'>
+                <div>
+                  <h1>One-hour push-up counter</h1>
+                  <p className='hero-copy'>
+                    Log each set as it happens and track the total toward
+                    1,000 reps.
+                  </p>
+                </div>
+                <div className='progress-ring'>
+                  <svg
+                    viewBox='0 0 120 120'
+                    className='ring-svg'
+                    aria-hidden='true'
+                  >
+                    <circle cx='60' cy='60' r='48' className='ring-track' />
+                    <circle
+                      cx='60'
+                      cy='60'
+                      r='48'
+                      className='ring-progress pushup-ring'
+                      style={{
+                        strokeDasharray: `${pushupProgressPercent * 3.016} 302`,
+                      }}
+                    />
+                  </svg>
+                  <div className='progress-copy'>
+                    <strong>{Math.round(pushupProgressPercent)}%</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className='hero-stats'>
+                <article>
+                  <span>Total push-ups</span>
+                  <strong>{totalPushups.toLocaleString()}</strong>
+                </article>
+                <article>
+                  <span>Remaining</span>
+                  <strong>{remainingPushups.toLocaleString()}</strong>
+                </article>
+                <article>
+                  <span>Sets</span>
+                  <strong>{pushupEntries.length}</strong>
+                </article>
+              </div>
+            </section>
+
+            <section className='panel pushup-log-panel'>
+              <div className='panel-header'>
+                <div>
+                  <p className='eyebrow'>Quick log</p>
+                  <h2>Add push-ups</h2>
+                </div>
+              </div>
+
+              <form className='pushup-form' onSubmit={handlePushupSubmit}>
+                <label>
+                  Push-ups completed
+                  <input
+                    type='number'
+                    min='1'
+                    step='1'
+                    inputMode='numeric'
+                    placeholder='e.g. 25'
+                    value={pushupReps}
+                    onChange={(event) => setPushupReps(event.target.value)}
+                  />
+                </label>
+                <button type='submit'>Add to total</button>
+              </form>
+              {pushupStatus ? (
+                <p className='filter-meta'>{pushupStatus}</p>
+              ) : null}
+            </section>
+
+            <section className='panel'>
+              <div className='panel-header'>
+                <div>
+                  <p className='eyebrow'>Recent sets</p>
+                  <h2>Push-up entries</h2>
+                </div>
+              </div>
+
+              <div className='recent-list'>
+                {pushupEntries.length ? (
+                  pushupEntries
+                    .slice()
+                    .reverse()
+                    .map((entry) => (
+                      <article key={entry.id} className='recent-card'>
+                        <div>
+                          <strong>{entry.reps.toLocaleString()} push-ups</strong>
+                          <span>{formatPerformedAt(entry.performedAt)}</span>
+                        </div>
+                        <div>
+                          <strong>
+                            {Math.min(
+                              (entry.reps / PUSHUP_GOAL) * 100,
+                              100,
+                            ).toFixed(1)}
+                            %
+                          </strong>
+                          <span>of goal</span>
+                        </div>
+                      </article>
+                    ))
+                ) : (
+                  <div className='empty-chart'>
+                    <strong>No push-ups yet</strong>
+                    <span>Add your first set to start the counter.</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </main>
     </div>
   )

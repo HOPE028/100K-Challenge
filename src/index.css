@@ -68,6 +68,31 @@ button {
   padding: 1.25rem 0 4rem;
 }
 
+.challenge-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(18px);
+}
+
+.challenge-tabs button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+
+.challenge-tabs button.active {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
 .hero-card,
 .panel,
 .status-strip {
@@ -151,6 +176,10 @@ button {
 .ring-progress {
   stroke: #ef4444;
   stroke-linecap: round;
+}
+
+.pushup-ring {
+  stroke: #38bdf8;
 }
 
 .progress-copy {
@@ -315,6 +344,94 @@ button {
   padding: 1rem;
 }
 
+.time-filter-panel {
+  margin-top: 1rem;
+}
+
+.time-filter-body {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.time-filter-label {
+  display: grid;
+  gap: 0.45rem;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.time-filter-label input[type='datetime-local'] {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.55);
+  color: #f8fafc;
+  padding: 0.95rem 1rem;
+  outline: none;
+  color-scheme: dark;
+  font: inherit;
+}
+
+.time-filter-label input[type='datetime-local']:focus {
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.16);
+}
+
+.pushup-log-panel {
+  margin-top: 1rem;
+}
+
+.pushup-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.pushup-form label {
+  display: grid;
+  gap: 0.45rem;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.pushup-form input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.55);
+  color: #f8fafc;
+  padding: 0.95rem 1rem;
+  outline: none;
+}
+
+.pushup-form input:focus {
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.16);
+}
+
+.pushup-form button {
+  border: 0;
+  border-radius: 18px;
+  background: #38bdf8;
+  color: #082f49;
+  padding: 0.95rem 1.2rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.filter-meta {
+  color: #cbd5e1;
+  font-size: 0.92rem;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -351,6 +468,10 @@ button {
   .compact-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .pushup-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -372,5 +493,15 @@ button {
 
   .compact-form {
     grid-template-columns: 1fr;
+  }
+
+  .challenge-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .challenge-tabs button {
+    padding-inline: 0.75rem;
   }
 }

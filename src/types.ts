@@ -13,3 +13,10 @@ export type WorkoutEntry = {
   source: "manual" | "voice";
   createdAt?: string;
 };
+
+export type PushupEntry = {
+  id: string;
+  reps: number;
+  performedAt: string;
+  createdAt?: string;
+};
